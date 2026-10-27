@@ -55,7 +55,7 @@ export async function subir(table, rows) {
 export const borrarId = (table, id) => request('POST', null, { action: 'delete', table, id });
 export const borrarDonde = (table, column, value) => request('POST', null, { action: 'deleteWhere', table, column, value });
 
-// IA: el servidor lee la factura con Claude y devuelve el asiento propuesto (la clave de la API nunca sale del servidor).
-export async function extraerFactura({ empresa_id, mime, data, plan, contexto }) {
-  return (await request('POST', null, { action: 'extraerFactura', empresa_id, mime, data, plan, contexto })).factura;
+// IA: el servidor lee la factura con el proveedor configurado (NVIDIA o Claude) y devuelve el asiento propuesto (la clave de la API nunca sale del servidor).
+export async function extraerFactura({ empresa_id, imagenes, plan, contexto }) {
+  return (await request('POST', null, { action: 'extraerFactura', empresa_id, imagenes, plan, contexto })).factura;
 }

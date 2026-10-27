@@ -25,9 +25,17 @@ Las hojas (`empresas`, `cuentas`, `asientos`, `saldos`, `borradores`) las crea e
 
 ## Facturas con IA
 
-1. En el Apps Script: *Configuración del proyecto → Propiedades del script* → `ANTHROPIC_API_KEY` = tu clave (opcional `ANTHROPIC_MODEL`, por defecto `claude-sonnet-5-5`). La clave **nunca llega al navegador**.
-2. En la app: *Facturas con IA* → arrastra fotos o PDF. Claude recibe el plan de cuentas de la empresa y solo puede usar esas cuentas; devuelve datos de la factura + asiento propuesto.
-3. La propuesta queda en **Pendientes**; “Revisar y aprobar” abre el editor de asientos para corregir y contabilizar. Avisa de posibles facturas duplicadas (mismo RIF + número).
+El proveedor de IA se elige en el Apps Script (*Configuración del proyecto → Propiedades del script*); las claves **nunca llegan al navegador**:
+
+| Propiedad | Valor |
+|---|---|
+| `IA_PROVIDER` | `nvidia` o `anthropic` (opcional: por defecto NVIDIA si existe `NVIDIA_API_KEY`) |
+| `NVIDIA_API_KEY` / `NVIDIA_MODEL` | clave `nvapi-…` de build.nvidia.com / modelo de visión (por defecto `meta/llama-4-maverick-17b-128e-instruct`; copia el ID exacto de su página en build.nvidia.com) |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | clave de Anthropic / modelo (por defecto `claude-sonnet-5-5`; `claude-haiku-5-5` es más barato) |
+
+En la app: *Facturas con IA* → arrastra fotos o PDF (los PDF se convierten a imagen en el navegador; se usan hasta 3 páginas con Claude y la primera con NVIDIA). La IA recibe el plan de cuentas de la empresa, solo puede usar esas cuentas y devuelve datos + asiento propuesto. Queda en **Pendientes**; “Revisar y aprobar” abre el editor para corregir y contabilizar. Avisa de posibles facturas duplicadas (mismo RIF + número).
+
+Para comparar proveedores: procesa las mismas 20–30 facturas reales con cada uno (cambia `IA_PROVIDER`) y cuenta cuántas salen bien sin corregir. Los modelos gratuitos de NVIDIA tienen límite de ~40 solicitudes por minuto y pueden devolver JSON imperfecto (el script lo interpreta con tolerancia y normaliza los montos "1.000,00").
 
 ### Conector para Claude (u otra automatización)
 

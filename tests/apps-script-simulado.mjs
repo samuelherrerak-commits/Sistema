@@ -4,6 +4,7 @@ import http from 'node:http';
 const TOKEN = 'TEST';
 const tablas = { empresas: [], cuentas: [], asientos: [], saldos: [], borradores: [] };
 const texto = (v) => (v == null ? '' : String(v));
+export const ultimas = { extraer: null };
 export function crearServidor(puerto, { facturaIA } = {}) {
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -39,6 +40,7 @@ export function crearServidor(puerto, { facturaIA } = {}) {
         tablas.borradores.push({ id: 'ext-' + tablas.borradores.length, empresa_id: x.empresa_id, estado: 'pendiente', origen: x.origen || 'conector', fecha: texto(x.fecha), proveedor: texto(x.proveedor), rif: texto(x.rif), nro_factura: texto(x.nro_factura), total: texto(x.total), moneda: '', asiento: JSON.stringify(x.asiento), archivo: '', nota: texto(x.nota), created_at: now, updated_at: now });
         return responder({ ok: true });
       }
+      if (b.action === 'extraerFactura') ultimas.extraer = b;
       if (b.action === 'extraerFactura') return responder({ ok: true, factura: facturaIA ? facturaIA(b) : { tipo: 'compra', fecha: '2024-03-10', total: 116, lineas: [] } });
       responder({ ok: false, error: 'acción desconocida', code: 400 });
     });

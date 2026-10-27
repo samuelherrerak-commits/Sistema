@@ -20,9 +20,10 @@
  *  INSTALACIÓN (una sola vez):
  *   1. Crea una hoja de cálculo de Google → Extensiones → Apps Script → pega este archivo.
  *   2. Cambia TOKEN por una clave larga y propia (la misma se pone en la app → Ajustes → Conexión).
- *   3. Para la IA: Configuración del proyecto → Propiedades del script → agrega
- *        ANTHROPIC_API_KEY = sk-ant-...      (la clave NUNCA llega al navegador)
- *        ANTHROPIC_MODEL   = claude-sonnet-5-5   (opcional)
+ *   3. Para la IA: Configuración del proyecto → Propiedades del script → agrega (la clave NUNCA llega al navegador):
+ *        IA_PROVIDER       = nvidia | anthropic   (opcional; por defecto NVIDIA si existe NVIDIA_API_KEY)
+ *        NVIDIA_API_KEY    = nvapi-...            NVIDIA_MODEL    = meta/llama-4-maverick-17b-128e-instruct (opcional)
+ *        ANTHROPIC_API_KEY = sk-ant-...           ANTHROPIC_MODEL = claude-sonnet-5-5 (opcional)
  *   4. Implementar → Nueva implementación → Aplicación web → Ejecutar como: Yo,
  *      Quién tiene acceso: Cualquier persona. Copia la URL /exec a la app.
  * ============================================================================
@@ -220,18 +221,22 @@ function crearBorrador_(b) {
 }
 
 /**
- * Lee una factura (imagen o PDF) con Claude y devuelve un borrador de asiento. El modelo SOLO puede
- * usar cuentas del plan que envía la app. No guarda nada: la app decide si lo agrega a la bandeja.
+ * Lee una factura (imágenes) con IA y devuelve los datos + el asiento propuesto. No guarda nada: la app decide
+ * si lo agrega a la bandeja. El proveedor se elige con la propiedad del script IA_PROVIDER:
+ *   "nvidia"    → NVIDIA_API_KEY (+ NVIDIA_MODEL, por defecto meta/llama-4-maverick-17b-128e-instruct)
+ *   "anthropic" → ANTHROPIC_API_KEY (+ ANTHROPIC_MODEL, por defecto claude-sonnet-5-5)
+ * Si no se define, usa NVIDIA cuando existe NVIDIA_API_KEY y si no, Anthropic.
+ * El modelo SOLO puede usar cuentas del plan que envía la app.
  */
 function extraerFactura_(body) {
-  const key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
-  if (!key) throw httpError_(500, 'Falta ANTHROPIC_API_KEY en las propiedades del script.');
-  const model = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_MODEL') || 'claude-sonnet-5-5';
-  if (!body.data || !body.mime) throw httpError_(400, 'Falta el archivo (data/mime).');
-  if (body.data.length * 0.75 > MAX_FILE_BYTES) throw httpError_(400, 'El archivo supera 8 MB.');
-  const plan = (body.plan || []).map(function (c) { return c[0] + ' ' + c[1]; }).join('\n');
-  const esPdf = body.mime === 'application/pdf';
+  const props = PropertiesService.getScriptProperties();
+  const imagenes = (body.imagenes && body.imagenes.length ? body.imagenes : (body.data ? [{ mime: body.mime, data: body.data }] : []));
+  if (!imagenes.length) throw httpError_(400, 'Falta la imagen de la factura.');
+  const bytes = imagenes.reduce(function (s, i) { return s + (i.data || '').length * 0.75; }, 0);
+  if (bytes > MAX_FILE_BYTES) throw httpError_(400, 'El archivo supera 8 MB.');
+  const proveedor = (props.getProperty('IA_PROVIDER') || (props.getProperty('NVIDIA_API_KEY') ? 'nvidia' : 'anthropic')).toLowerCase();
 
+  const plan = (body.plan || []).map(function (c) { return c[0] + ' ' + c[1]; }).join('\n');
   const system = [
     'Eres un asistente contable venezolano. Lees una factura/recibo y propones UN asiento de partida doble.',
     'REGLAS:',
@@ -247,30 +252,38 @@ function extraerFactura_(body) {
     'PLAN DE CUENTAS DE LA EMPRESA (codigo nombre):',
     plan
   ].join('\n');
+  const contexto = 'Extrae la factura y propón el asiento. ' + (body.contexto || '');
 
-  const tool = {
-    name: 'registrar_factura',
-    description: 'Devuelve los datos de la factura y el asiento contable propuesto.',
-    strict: false,
-    input_schema: {
-      type: 'object',
-      properties: {
-        tipo: { type: 'string', enum: ['compra', 'venta', 'otro'] },
-        fecha: { type: 'string' }, proveedor: { type: 'string', description: 'Proveedor (compra) o cliente (venta)' },
-        rif: { type: 'string' }, nro_factura: { type: 'string' }, nro_control: { type: 'string' },
-        moneda: { type: 'string' }, base_imponible: { type: 'number' }, iva: { type: 'number' }, exento: { type: 'number' }, total: { type: 'number' },
-        observacion: { type: 'string', description: 'Texto corto para la columna Descripción del asiento' },
-        lineas: {
-          type: 'array',
-          items: { type: 'object', properties: { cuenta: { type: 'string' }, descripcion: { type: 'string' }, debe: { type: 'number' }, haber: { type: 'number' } }, required: ['cuenta', 'debe', 'haber'] }
-        },
-        confianza: { type: 'number', description: '0 a 1' },
-        notas: { type: 'string', description: 'Dudas o datos faltantes para revisar' }
-      },
-      required: ['tipo', 'fecha', 'total', 'lineas']
-    }
-  };
+  const factura = proveedor === 'nvidia' ? llamarNvidia_(props, system, contexto, imagenes) : llamarAnthropic_(props, system, contexto, imagenes);
+  return { ok: true, factura: normalizarFactura_(factura), proveedor: proveedor };
+}
 
+var CAMPOS_FACTURA_ = {
+  type: 'object',
+  properties: {
+    tipo: { type: 'string', enum: ['compra', 'venta', 'otro'] },
+    fecha: { type: 'string' }, proveedor: { type: 'string', description: 'Proveedor (compra) o cliente (venta)' },
+    rif: { type: 'string' }, nro_factura: { type: 'string' }, nro_control: { type: 'string' },
+    moneda: { type: 'string' }, base_imponible: { type: 'number' }, iva: { type: 'number' }, exento: { type: 'number' }, total: { type: 'number' },
+    observacion: { type: 'string', description: 'Texto corto para la columna Descripción del asiento' },
+    lineas: {
+      type: 'array',
+      items: { type: 'object', properties: { cuenta: { type: 'string' }, descripcion: { type: 'string' }, debe: { type: 'number' }, haber: { type: 'number' } }, required: ['cuenta', 'debe', 'haber'] }
+    },
+    confianza: { type: 'number', description: '0 a 1' },
+    notas: { type: 'string', description: 'Dudas o datos faltantes para revisar' }
+  },
+  required: ['tipo', 'fecha', 'total', 'lineas']
+};
+
+function llamarAnthropic_(props, system, contexto, imagenes) {
+  const key = props.getProperty('ANTHROPIC_API_KEY');
+  if (!key) throw httpError_(500, 'Falta ANTHROPIC_API_KEY en las propiedades del script.');
+  const model = props.getProperty('ANTHROPIC_MODEL') || 'claude-sonnet-5-5';
+  const bloques = imagenes.map(function (i) {
+    return { type: i.mime === 'application/pdf' ? 'document' : 'image', source: { type: 'base64', media_type: i.mime, data: i.data } };
+  });
+  bloques.push({ type: 'text', text: contexto });
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
@@ -279,11 +292,9 @@ function extraerFactura_(body) {
       // Esfuerzo bajo: leer una factura no necesita razonamiento largo (y cuesta menos).
       model: model, max_tokens: 4096, system: system + '\n\nResponde SIEMPRE llamando a la herramienta registrar_factura, sin texto adicional.',
       output_config: { effort: 'low' },
-      tools: [tool], tool_choice: { type: 'auto' },
-      messages: [{ role: 'user', content: [
-        { type: esPdf ? 'document' : 'image', source: { type: 'base64', media_type: body.mime, data: body.data } },
-        { type: 'text', text: 'Extrae la factura y propón el asiento. ' + (body.contexto || '') }
-      ] }]
+      tools: [{ name: 'registrar_factura', description: 'Devuelve los datos de la factura y el asiento contable propuesto.', input_schema: CAMPOS_FACTURA_ }],
+      tool_choice: { type: 'auto' },
+      messages: [{ role: 'user', content: bloques }]
     })
   });
   const code = res.getResponseCode();
@@ -291,7 +302,62 @@ function extraerFactura_(body) {
   if (code !== 200) throw httpError_(502, 'Error de la API de Claude (' + code + '): ' + ((parsed.error && parsed.error.message) || res.getContentText().slice(0, 200)));
   const block = (parsed.content || []).filter(function (c) { return c.type === 'tool_use'; })[0];
   if (!block) throw httpError_(502, 'La IA no devolvió datos estructurados.');
-  return { ok: true, factura: block.input, modelo: model };
+  return block.input;
+}
+
+// NVIDIA (build.nvidia.com): API compatible con OpenAI. Los modelos de visión leen imágenes (no PDF: la app
+// convierte los PDF a imagen) y no garantizan JSON, así que se pide JSON en texto y se interpreta con tolerancia.
+function llamarNvidia_(props, system, contexto, imagenes) {
+  const key = props.getProperty('NVIDIA_API_KEY');
+  if (!key) throw httpError_(500, 'Falta NVIDIA_API_KEY en las propiedades del script.');
+  const model = props.getProperty('NVIDIA_MODEL') || 'meta/llama-4-maverick-17b-128e-instruct';
+  const esquema = JSON.stringify(CAMPOS_FACTURA_.properties);
+  const instrucciones = system + '\n\nRESPONDE ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin ```), con estos campos: ' + esquema + '. "lineas" es obligatorio.';
+  const img = imagenes[0]; // los modelos gratuitos aceptan una imagen por solicitud: se usa la primera página
+  const res = UrlFetchApp.fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + key, Accept: 'application/json' },
+    payload: JSON.stringify({
+      model: model, max_tokens: 2048, temperature: 0.1, stream: false,
+      messages: [
+        { role: 'system', content: instrucciones },
+        { role: 'user', content: [{ type: 'text', text: contexto }, { type: 'image_url', image_url: { url: 'data:' + img.mime + ';base64,' + img.data } }] }
+      ]
+    })
+  });
+  const code = res.getResponseCode(), raw = res.getContentText();
+  if (code !== 200) throw httpError_(502, 'Error de NVIDIA (' + code + '): ' + raw.slice(0, 300));
+  let texto = '';
+  try { texto = JSON.parse(raw).choices[0].message.content || ''; } catch (e) { throw httpError_(502, 'Respuesta inesperada de NVIDIA: ' + raw.slice(0, 200)); }
+  return parseJsonLoose_(texto);
+}
+
+// Extrae el primer objeto JSON de un texto (tolera ```json, texto alrededor y comas finales).
+function parseJsonLoose_(texto) {
+  let t = String(texto || '').replace(/```json|```/gi, '').trim();
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a === -1 || b <= a) throw httpError_(502, 'La IA no devolvió JSON: ' + t.slice(0, 150));
+  t = t.slice(a, b + 1).replace(/,\s*([}\]])/g, '$1');
+  try { return JSON.parse(t); } catch (e) { throw httpError_(502, 'JSON inválido de la IA: ' + t.slice(0, 150)); }
+}
+
+// Deja la respuesta en un formato único sin importar el proveedor (números como números, líneas completas).
+function normalizarFactura_(f) {
+  // Acepta "1.000,00" (formato venezolano) y "1,000.00": el último separador es el decimal.
+  const n = function (v) {
+    if (typeof v === 'number') return v;
+    let t = String(v == null ? '' : v).replace(/[^\d.,\-]/g, '');
+    const c = t.lastIndexOf(','), d = t.lastIndexOf('.');
+    if (c > -1 && d > -1) t = c > d ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+    else if (c > -1) t = /,\d{1,2}$/.test(t) ? t.replace(',', '.') : t.replace(/,/g, '');
+    const x = parseFloat(t); return isNaN(x) ? 0 : x;
+  };
+  f = f || {};
+  f.lineas = (Array.isArray(f.lineas) ? f.lineas : []).map(function (l) {
+    return { cuenta: String(l.cuenta == null ? '' : l.cuenta).replace(/\D/g, ''), descripcion: l.descripcion || '', debe: n(l.debe), haber: n(l.haber) };
+  });
+  ['total', 'base_imponible', 'iva', 'exento', 'confianza'].forEach(function (k) { if (f[k] != null) f[k] = n(f[k]); });
+  return f;
 }
 
 // ---------------------------------------------------------------------------

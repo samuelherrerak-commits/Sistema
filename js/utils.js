@@ -98,3 +98,21 @@ export function descargar(nombre, contenido, tipo = 'application/json') {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
+
+// pdf.js (lectura de PDF en el navegador) se carga a demanda, solo para convertir facturas en PDF a imagen.
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let pdfjsPromise = null;
+export function ensurePdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = PDFJS;
+      sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER; resolve(window.pdfjsLib); };
+      sc.onerror = () => { pdfjsPromise = null; reject(new Error('No se pudo cargar el lector de PDF (¿sin internet?).')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return pdfjsPromise;
+}

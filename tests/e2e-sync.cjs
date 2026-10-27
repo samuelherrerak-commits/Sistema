@@ -2,7 +2,7 @@
 // bandeja de IA y asiento de cierre. Requiere: servidor estático en :8765.
 const { chromium } = require('playwright');
 (async () => {
-  const { crearServidor } = await import('./apps-script-simulado.mjs');
+  const { crearServidor, ultimas } = await import('./apps-script-simulado.mjs');
   const { tablas, srv } = await crearServidor(8766, { facturaIA: (b) => ({ tipo: 'compra', fecha: '2024-03-10', proveedor: 'Papelería XYZ', rif: 'J-111', nro_factura: 'F-001', moneda: 'VES', base_imponible: 100, iva: 16, total: 116, observacion: 'Compra de papelería', confianza: 0.93, notas: '', lineas: [{ cuenta: '6104023', descripcion: 'Papelería', debe: 100, haber: 0 }, { cuenta: '1108004', descripcion: 'IVA', debe: 16, haber: 0 }, { cuenta: '2101002', descripcion: 'Proveedor', debe: 0, haber: 116 }] }) });
   const b = await chromium.launch(); let fallos = 0;
   const ok = (c, m) => { console.log((c ? 'OK   ' : 'FALLA') + ' ' + m); if (!c) fallos++; };
@@ -48,6 +48,15 @@ const { chromium } = require('playwright');
   await B.locator('[data-apr]').first().click(); await B.waitForSelector('#ae-save');
   const sumas = await B.locator('#ae-dif').innerText(); ok(sumas.includes('Cuadrado'), 'La propuesta de la IA llega cuadrada al editor');
   await B.click('#ae-save'); await B.waitForSelector('text=guardado'); await B.waitForFunction(() => document.querySelector('#sync-badge').textContent.includes('Sincronizado'), null, { timeout: 15000 }); await B.waitForTimeout(1500);
+
+  // PDF: se convierte a imagen en el navegador antes de enviarlo a la IA (los modelos de visión no leen PDF)
+  await B.goto(`http://localhost:8765/#/e/${empId}/facturas`); await B.waitForSelector('#fa-file', { state: 'attached' });
+  ultimas.extraer = null;
+  await B.setInputFiles('#fa-file', process.env.PDF_PRUEBA);
+  for (let i = 0; i < 60 && !ultimas.extraer; i++) await B.waitForTimeout(250);
+  const im = ultimas.extraer && ultimas.extraer.imagenes;
+  ok(im && im.length >= 1 && im[0].mime === 'image/jpeg' && im[0].data.length > 2000 && !ultimas.extraer.data, `El PDF llegó al servidor como imagen JPEG (${im ? im[0].data.length : 0} caracteres base64)`);
+  await B.waitForTimeout(800);
 
   // Equipo A trae los cambios de B
   await A.goto(`http://localhost:8765/#/e/${empId}/asientos`); await A.waitForTimeout(500); await A.goto('http://localhost:8765/#/conexion'); await A.click('#cx-ahora');

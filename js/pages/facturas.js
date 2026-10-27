@@ -5,27 +5,41 @@ import Store from '../store.js';
 import Sync from '../sync.js';
 import * as Sheets from '../sheets.js';
 import { validarAsiento } from '../engine.js';
-import { esc, fmtNum, fmtFecha } from '../utils.js';
+import { esc, fmtNum, fmtFecha, ensurePdfJs } from '../utils.js';
 import { icon } from '../components/icons.js';
 import { card, btnPrimary, btnSecondary, btnIcon, badge, toast, confirmar } from '../components/ui.js';
 import { abrirEditorAsiento } from '../components/asiento-editor.js';
 
-// Reduce fotos grandes (los celulares sacan 5–10 MB) antes de enviarlas a la IA.
-function leerArchivo(file) {
-  return new Promise((resolve, reject) => {
-    if (file.type === 'application/pdf') {
-      const r = new FileReader();
-      r.onload = () => resolve({ mime: file.type, data: String(r.result).split(',')[1] });
-      r.onerror = reject; r.readAsDataURL(file); return;
+// Convierte lo subido en imágenes JPEG de tamaño razonable (las fotos de celular pesan 5–10 MB y los modelos
+// gratuitos tienen límites). Los PDF se rasterizan aquí: así sirven para cualquier proveedor de IA.
+const MAX_LADO = 1600;
+function canvasAJpeg(canvas) {
+  return { mime: 'image/jpeg', data: canvas.toDataURL('image/jpeg', 0.82).split(',')[1] };
+}
+async function leerArchivo(file) {
+  if (file.type === 'application/pdf') {
+    const pdfjs = await ensurePdfJs();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const out = [];
+    for (let n = 1; n <= Math.min(doc.numPages, 3); n++) {
+      const page = await doc.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(2.5, MAX_LADO / Math.max(base.width, base.height)) });
+      const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      out.push(canvasAJpeg(c));
     }
-    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) return reject(new Error('Formato no soportado: usa foto (JPG/PNG/WEBP) o PDF.'));
+    return out;
+  }
+  if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) throw new Error('Formato no soportado: usa foto (JPG/PNG/WEBP) o PDF.');
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const max = 1800, k = Math.min(1, max / Math.max(img.width, img.height));
+      const k = Math.min(1, MAX_LADO / Math.max(img.width, img.height));
       const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      resolve({ mime: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
-      URL.revokeObjectURL(img.src);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src); resolve([canvasAJpeg(c)]);
     };
     img.onerror = () => reject(new Error('No se pudo leer la imagen.'));
     img.src = URL.createObjectURL(file);
@@ -99,9 +113,9 @@ const Facturas = {
         const f = files[i];
         $('fa-prog').textContent = `Leyendo ${f.name} (${i + 1} de ${files.length})…`;
         try {
-          const { mime, data } = await leerArchivo(f);
+          const imagenes = await leerArchivo(f);
           const r = await Sheets.extraerFactura({
-            empresa_id: e.id, mime, data, plan: hojas.map(c => [c.codigo, c.nombre]),
+            empresa_id: e.id, imagenes, plan: hojas.map(c => [c.codigo, c.nombre]),
             contexto: `La empresa contabilizada es "${e.nombre}"${e.rif ? ` (RIF ${e.rif})` : ''}. Si la factura está emitida A NOMBRE de esa empresa es una compra; si la emite esa empresa es una venta.`
           });
           const lineas = (r.lineas || []).map(l => ({ cuenta: String(l.cuenta || ''), descripcion: l.descripcion || r.observacion || '', debe: Number(l.debe) || 0, haber: Number(l.haber) || 0 }));
