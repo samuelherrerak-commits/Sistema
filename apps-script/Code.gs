@@ -22,7 +22,7 @@
  *   2. Cambia TOKEN por una clave larga y propia (la misma se pone en la app → Ajustes → Conexión).
  *   3. Para la IA: Configuración del proyecto → Propiedades del script → agrega (la clave NUNCA llega al navegador):
  *        IA_PROVIDER       = nvidia | anthropic   (opcional; por defecto NVIDIA si existe NVIDIA_API_KEY)
- *        NVIDIA_API_KEY    = nvapi-...            NVIDIA_MODEL    = meta/llama-4-maverick-17b-128e-instruct (opcional)
+ *        NVIDIA_API_KEY    = nvapi-...            NVIDIA_MODEL    = nvidia/nemotron-3.5-super-vl-120b-a12b (opcional)
  *        ANTHROPIC_API_KEY = sk-ant-...           ANTHROPIC_MODEL = claude-sonnet-5-5 (opcional)
  *   4. Implementar → Nueva implementación → Aplicación web → Ejecutar como: Yo,
  *      Quién tiene acceso: Cualquier persona. Copia la URL /exec a la app.
@@ -223,7 +223,7 @@ function crearBorrador_(b) {
 /**
  * Lee una factura (imágenes) con IA y devuelve los datos + el asiento propuesto. No guarda nada: la app decide
  * si lo agrega a la bandeja. El proveedor se elige con la propiedad del script IA_PROVIDER:
- *   "nvidia"    → NVIDIA_API_KEY (+ NVIDIA_MODEL, por defecto meta/llama-4-maverick-17b-128e-instruct)
+ *   "nvidia"    → NVIDIA_API_KEY (+ NVIDIA_MODEL, por defecto nvidia/nemotron-3.5-super-vl-120b-a12b, probado)
  *   "anthropic" → ANTHROPIC_API_KEY (+ ANTHROPIC_MODEL, por defecto claude-sonnet-5-5)
  * Si no se define, usa NVIDIA cuando existe NVIDIA_API_KEY y si no, Anthropic.
  * El modelo SOLO puede usar cuentas del plan que envía la app.
@@ -310,20 +310,21 @@ function llamarAnthropic_(props, system, contexto, imagenes) {
 function llamarNvidia_(props, system, contexto, imagenes) {
   const key = props.getProperty('NVIDIA_API_KEY');
   if (!key) throw httpError_(500, 'Falta NVIDIA_API_KEY en las propiedades del script.');
-  const model = props.getProperty('NVIDIA_MODEL') || 'meta/llama-4-maverick-17b-128e-instruct';
+  const model = props.getProperty('NVIDIA_MODEL') || 'nvidia/nemotron-3.5-super-vl-120b-a12b';
   const esquema = JSON.stringify(CAMPOS_FACTURA_.properties);
   const instrucciones = system + '\n\nRESPONDE ÚNICAMENTE con un objeto JSON válido (sin texto antes ni después, sin ```), con estos campos: ' + esquema + '. "lineas" es obligatorio.';
   const img = imagenes[0]; // los modelos gratuitos aceptan una imagen por solicitud: se usa la primera página
   const res = UrlFetchApp.fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { Authorization: 'Bearer ' + key, Accept: 'application/json' },
-    payload: JSON.stringify({
-      model: model, max_tokens: 2048, temperature: 0.1, stream: false,
+    payload: JSON.stringify(Object.assign({
+      model: model, max_tokens: 4096, temperature: 0.1, stream: false,
       messages: [
         { role: 'system', content: instrucciones },
         { role: 'user', content: [{ type: 'text', text: contexto }, { type: 'image_url', image_url: { url: 'data:' + img.mime + ';base64,' + img.data } }] }
       ]
-    })
+      // Los Nemotron "razonan" y gastan todos los tokens pensando (sin respuesta, ~25 s): se apaga el razonamiento (~3 s).
+    }, /nemotron/i.test(model) ? { chat_template_kwargs: { enable_thinking: false } } : {}))
   });
   const code = res.getResponseCode(), raw = res.getContentText();
   if (code !== 200) throw httpError_(502, 'Error de NVIDIA (' + code + '): ' + raw.slice(0, 300));
