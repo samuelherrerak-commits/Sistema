@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema Contable</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4.5A1.5 1.5 0 0 1 5.5 3H20v15H5.5A1.5 1.5 0 0 0 4 19.5z'/%3E%3Cpath d='M4 19.5A1.5 1.5 0 0 0 5.5 21H20v-3'/%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } } };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    .thin-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+    .dark-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
+    .dark-scroll::-webkit-scrollbar { width: 6px; }
+    .dark-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 9999px; }
+    .tabular { font-variant-numeric: tabular-nums; }
+    input[type=number]::-webkit-inner-spin-button { display: none; }
+    @media print {
+      @page { margin: 14mm; }
+      body { background: #fff !important; }
+      .no-print, #topbar, aside, nav.mobile-bar { display: none !important; }
+      main#app { padding: 0 !important; max-width: none !important; }
+      .card-print { box-shadow: none !important; border: 0 !important; padding: 0 !important; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <header id="topbar" class="sticky top-0 z-50"><div id="navbar"></div></header>
+  <main id="app" class="max-w-[1500px] mx-auto"></main>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

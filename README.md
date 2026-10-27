@@ -1,0 +1,76 @@
+# Sistema Contable
+
+Reemplazo en JavaScript del `SISTEMA.xlsm` (contabilidad por partida doble con macros). Sitio **100 % estático**
+(sin build, sin servidor): HTML + módulos ES + Tailwind por CDN, con el mismo diseño del módulo de Contabilidad de CIFCalc.
+
+- **Multiempresa**: pantalla de inicio para elegir con qué empresa trabajar (cada una con su plan de cuentas, ejercicios y saldos).
+- **Rápido**: todo se calcula en el navegador desde IndexedDB (100.000 líneas con todos los reportes ≈ 0,1 s).
+- **Base de datos en Google Sheets** (Apps Script) como respaldo y para compartir entre equipos; sin conexión la app sigue funcionando y sube los cambios después.
+- **Facturas con IA**: sube una foto/PDF → Claude propone el asiento → una persona lo revisa y aprueba (nunca se contabiliza solo).
+- Importa los archivos `.xlsm` del sistema anterior (Parámetros, Plan, Movimientos, Saldo inicial).
+
+## Desplegar (estático)
+
+Sube la carpeta tal cual a cualquier hosting estático (GitHub Pages, Netlify, Cloudflare Pages…). No hay paso de compilación.
+Para probar local: `python3 -m http.server 8765` y abrir http://localhost:8765.
+
+## Conectar Google Sheets (una vez)
+
+1. Crea una hoja de cálculo de Google → *Extensiones → Apps Script* → pega `apps-script/Code.gs`.
+2. Cambia `TOKEN` por una clave larga propia (mientras tenga el valor por defecto el script rechaza todo).
+3. *Implementar → Nueva implementación → Aplicación web*: ejecutar como **Yo**, acceso **Cualquier persona**. Copia la URL `/exec`.
+4. En la app: *Conexión* → pega URL + token → *Guardar y probar* → *Subir todo lo de este equipo*.
+
+Las hojas (`empresas`, `cuentas`, `asientos`, `saldos`, `borradores`) las crea el script solo. Un asiento = una fila (las líneas van en JSON).
+
+## Facturas con IA
+
+1. En el Apps Script: *Configuración del proyecto → Propiedades del script* → `ANTHROPIC_API_KEY` = tu clave (opcional `ANTHROPIC_MODEL`, por defecto `claude-sonnet-5-5`). La clave **nunca llega al navegador**.
+2. En la app: *Facturas con IA* → arrastra fotos o PDF. Claude recibe el plan de cuentas de la empresa y solo puede usar esas cuentas; devuelve datos de la factura + asiento propuesto.
+3. La propuesta queda en **Pendientes**; “Revisar y aprobar” abre el editor de asientos para corregir y contabilizar. Avisa de posibles facturas duplicadas (mismo RIF + número).
+
+### Conector para Claude (u otra automatización)
+
+El Apps Script expone `crearBorrador`: cualquier agente que pueda hacer un POST deja una propuesta en la bandeja de una empresa (no contabiliza nada):
+
+```bash
+curl -L -X POST "$URL_EXEC" -H "Content-Type: text/plain" -d '{
+  "action":"crearBorrador","pt":"TU_TOKEN",
+  "borrador":{"empresa_id":"<id de la empresa>","origen":"claude","proveedor":"Proveedor C.A.","rif":"J-123","nro_factura":"F-77","total":232,"moneda":"VES",
+    "asiento":{"fecha":"2024-03-12","observacion":"Compra","lineas":[
+      {"cuenta":"6104023","descripcion":"Suministros","debe":200,"haber":0},
+      {"cuenta":"1108004","descripcion":"IVA crédito","debe":32,"haber":0},
+      {"cuenta":"2101002","descripcion":"Proveedor","debe":0,"haber":232}]}}}'
+```
+
+Lectura de datos para el agente: `GET ?table=cuentas&column=empresa_id&value=<id>&pt=TOKEN` (plan de cuentas) y lo mismo con `asientos`.
+
+## Estructura
+
+```
+index.html            entrada (Tailwind CDN, Inter)
+js/engine.js          motor contable puro (réplica verificada del Excel)
+js/store.js, db.js    estado + IndexedDB;  sync.js, sheets.js  cola de cambios y cliente de Sheets
+js/xlsx-io.js         importar el Excel anterior / exportar
+js/pages/*.js         una pantalla por archivo;  js/components/*  menú, editor de asientos, UI común
+apps-script/Code.gs   backend (Sheets + IA + bandeja)
+tests/                pruebas (ver abajo)
+docs/ANALISIS-EXCEL.md  cómo funcionaba el Excel y qué se mejoró
+```
+
+## Pruebas
+
+```bash
+node --test tests/engine.test.mjs                 # motor: 16 pruebas + rendimiento
+python3 -m http.server 8765 &                     # y luego, con Playwright instalado:
+node tests/e2e-sync.cjs                           # dos equipos + Sheets simulado + bandeja IA + cierre
+node tests/gen-datos.mjs /tmp/datos.json          # compara el motor contra el SISTEMA.xlsm recalculado por LibreOffice:
+python3 -I tests/verify-contra-excel.py SISTEMA.xlsm /tmp/datos.json /tmp/vx
+```
+
+## Seguridad y límites
+
+- El sitio es estático: la URL y el token de Sheets se guardan en el navegador de cada equipo. Es un secreto débil; usa una hoja exclusiva y no compartas la URL.
+- Sin usuarios/roles todavía: quien tenga la URL+token ve todas las empresas.
+- Conflictos: gana el cambio más reciente por fila (`updated_at`). Si dos personas editan el mismo asiento a la vez, se queda el último.
+- La IA puede equivocarse: por eso todo pasa por revisión humana y por la validación de partida doble.
