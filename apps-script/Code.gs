@@ -28,7 +28,7 @@
  * ============================================================================
  */
 
-const TOKEN = 'CAMBIA_ESTE_TOKEN';
+const TOKEN = 'SISTEMA EK';
 const REQUIRE_TOKEN_ON_GET = true;
 const MAX_ROWS_PER_BATCH = 100;
 const LOCK_WAIT_MS = 30000;
@@ -300,7 +300,7 @@ function withLock_(fn) {
   try { return fn(); } finally { lock.releaseLock(); }
 }
 function validateTable_(t) { return t && SCHEMAS[t] ? null : 'tabla desconocida: ' + t; }
-function isAuthorized_(pt) { return TOKEN !== 'CAMBIA_ESTE_TOKEN' && pt === TOKEN; }
+function isAuthorized_(pt) { return pt === TOKEN; }
 function toText_(v) {
   if (v === null || v === undefined) return '';
   if (v instanceof Date) return v.toISOString();

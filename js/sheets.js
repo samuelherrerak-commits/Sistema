@@ -1,10 +1,12 @@
 // Cliente del backend Google Sheets (Apps Script). Mismo contrato que CIFCalc.
 // La URL y el token se guardan en este navegador (Ajustes → Conexión): el sitio estático no lleva secretos.
+import { SHEETS_URL, SHEETS_TOKEN } from './config.js';
 const KEY = 'sc_conexion';
+const PREDETERMINADA = { url: SHEETS_URL, token: SHEETS_TOKEN, activo: !!(SHEETS_URL && SHEETS_TOKEN) };
 
 export function getConexion() {
-  try { return { url: '', token: '', activo: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
-  catch { return { url: '', token: '', activo: false }; }
+  try { return { ...PREDETERMINADA, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
+  catch { return { ...PREDETERMINADA }; }
 }
 export function setConexion(c) {
   try { localStorage.setItem(KEY, JSON.stringify({ url: String(c.url || '').trim(), token: String(c.token || '').trim(), activo: !!c.activo })); } catch { /* sin almacenamiento */ }

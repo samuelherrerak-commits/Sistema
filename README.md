@@ -17,9 +17,9 @@ Para probar local: `python3 -m http.server 8765` y abrir http://localhost:8765.
 ## Conectar Google Sheets (una vez)
 
 1. Crea una hoja de cálculo de Google → *Extensiones → Apps Script* → pega `apps-script/Code.gs`.
-2. Cambia `TOKEN` por una clave larga propia (mientras tenga el valor por defecto el script rechaza todo).
+2. Pon en `TOKEN` la clave que usará la app (hoy `SISTEMA EK`, la misma de `js/config.js`).
 3. *Implementar → Nueva implementación → Aplicación web*: ejecutar como **Yo**, acceso **Cualquier persona**. Copia la URL `/exec`.
-4. En la app: *Conexión* → pega URL + token → *Guardar y probar* → *Subir todo lo de este equipo*.
+4. La URL y el token ya vienen precargados desde `js/config.js`; en la app: *Conexión* → *Guardar y probar* → *Subir todo lo de este equipo*. Cada navegador puede cambiarlos ahí.
 
 Las hojas (`empresas`, `cuentas`, `asientos`, `saldos`, `borradores`) las crea el script solo. Un asiento = una fila (las líneas van en JSON).
 
