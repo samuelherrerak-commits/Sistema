@@ -251,6 +251,7 @@ function extraerFactura_(body) {
   const tool = {
     name: 'registrar_factura',
     description: 'Devuelve los datos de la factura y el asiento contable propuesto.',
+    strict: false,
     input_schema: {
       type: 'object',
       properties: {
@@ -274,8 +275,11 @@ function extraerFactura_(body) {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     payload: JSON.stringify({
-      model: model, max_tokens: 2048, system: system,
-      tools: [tool], tool_choice: { type: 'tool', name: 'registrar_factura' },
+      // Sonnet 5.5 rechaza tool_choice forzado (400): se usa "auto" + instrucción en el system prompt.
+      // Esfuerzo bajo: leer una factura no necesita razonamiento largo (y cuesta menos).
+      model: model, max_tokens: 4096, system: system + '\n\nResponde SIEMPRE llamando a la herramienta registrar_factura, sin texto adicional.',
+      output_config: { effort: 'low' },
+      tools: [tool], tool_choice: { type: 'auto' },
       messages: [{ role: 'user', content: [
         { type: esPdf ? 'document' : 'image', source: { type: 'base64', media_type: body.mime, data: body.data } },
         { type: 'text', text: 'Extrae la factura y propón el asiento. ' + (body.contexto || '') }
